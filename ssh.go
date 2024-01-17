@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/armon/go-socks5"
+	"github.com/hossinasaadi/go-socks5"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -32,6 +32,7 @@ func InitSSH(sshAddress string, socks5Address string, sshUser string, sshPass st
 			Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return sshConn.Dial(network, addr)
 			},
+			DisableFQDN: true,
 		}
 
 		serverSocks, err := socks5.New(conf)
