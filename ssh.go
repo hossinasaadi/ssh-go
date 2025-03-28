@@ -7,18 +7,26 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/hossinasaadi/go-socks5"
 	"golang.org/x/crypto/ssh"
 )
 
-func InitSSH(sshAddress string, socks5Address string, sshUser string, sshPass string) {
-	sshConf := &ssh.ClientConfig{
+var sshConf *ssh.ClientConfig
+var sshConn *ssh.Client
+var err error
+
+const timeout time.Duration = 5 * time.Second
+
+func InitSSH(sshAddress string, socks5Address string, sshUser string, sshPass string, remoteAddr string, localAddr string) {
+	sshConf = &ssh.ClientConfig{
 		User:            sshUser,
+		Timeout:         timeout,
 		Auth:            []ssh.AuthMethod{ssh.Password(sshPass)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
-	sshConn, err := ssh.Dial("tcp", sshAddress, sshConf)
+	sshConn, err = ssh.Dial("tcp", sshAddress, sshConf)
 	if err != nil {
 		fmt.Println("error tunnel to server: ", err)
 		return
@@ -30,7 +38,10 @@ func InitSSH(sshAddress string, socks5Address string, sshUser string, sshPass st
 	go func() {
 		conf := &socks5.Config{
 			Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return sshConn.Dial(network, addr)
+				if addr == localAddr {
+					return sshConn.DialContext(ctx, network, remoteAddr)
+				}
+				return sshConn.DialContext(ctx, network, addr)
 			},
 			DisableFQDN: true,
 		}
@@ -49,6 +60,7 @@ func InitSSH(sshAddress string, socks5Address string, sshUser string, sshPass st
 		}
 
 	}()
+	go handleReconnects(sshAddress)
 
 	ch := make(chan os.Signal)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
@@ -56,4 +68,52 @@ func InitSSH(sshAddress string, socks5Address string, sshUser string, sshPass st
 
 	return
 
+}
+
+// func handleReconnects(sshAddress string) {
+// 	closed := make(chan error, 1)
+// 	go func() {
+// 		closed <- sshConn.Wait()
+// 	}()
+
+//		select {
+//		case res := <-closed:
+//			println("closed:" + res.Error())
+//			sshConn, err = ssh.Dial("tcp", sshAddress, sshConf)
+//			if err != nil {
+//				println("Failed to reconnect:" + err.Error())
+//				return
+//			}
+//			// Cool we have a new connection, keep going
+//			handleReconnects(sshAddress)
+//		}
+//	}
+func handleReconnects(sshAddress string) {
+	// Periodically check the connection to google.com
+	for {
+		err := checkConnection(sshConn)
+		if err != nil {
+			fmt.Println("SSH tunnel lost or cannot reach google.com:", err)
+			sshConn, err = ssh.Dial("tcp", sshAddress, sshConf)
+			if err != nil {
+				println("Failed to reconnect:" + err.Error())
+				return
+			}
+		} else {
+			fmt.Println("SSH tunnel is active and google.com is reachable.")
+		}
+		time.Sleep(10 * time.Second) // Check every second
+	}
+
+}
+func checkConnection(sshConn *ssh.Client) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	conn, err := sshConn.DialContext(ctx, "tcp", "google.com:80")
+	if err != nil {
+		return err
+	}
+	conn.Close() // Close the connection after checking
+	return nil
 }

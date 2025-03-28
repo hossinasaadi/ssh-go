@@ -1,1 +1,5 @@
 build*
+main
+*.zip
+*.aar
+*.jar
