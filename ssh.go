@@ -19,11 +19,31 @@ var err error
 
 const timeout time.Duration = 5 * time.Second
 
-func InitSSH(sshAddress string, socks5Address string, sshUser string, sshPass string, remoteAddr string, localAddr string) {
+func InitSSH(sshAddress string, socks5Address string, sshUser string, sshPass string, privateKeyContent string, remoteAddr string, localAddr string) {
+	auths := []ssh.AuthMethod{ssh.Password(sshPass)}
+
+	if privateKeyContent != "" {
+		// or get the signer from your private key file directly
+		// pemBytes, err := os.ReadFile(privateKeyPath)
+		// if err != nil {
+		// 	fmt.Println("Reading private key file failed %v", err)
+		// 	return
+		// }
+		pemBytes := []byte(privateKeyContent)
+		// create signer
+		signer, err := signerFromPem(pemBytes, []byte(sshPass))
+		if err != nil {
+			fmt.Println("signer failed ", err)
+			return
+		}
+
+		auths = []ssh.AuthMethod{ssh.PublicKeys(signer)}
+	}
+
 	sshConf = &ssh.ClientConfig{
 		User:            sshUser,
 		Timeout:         timeout,
-		Auth:            []ssh.AuthMethod{ssh.Password(sshPass)},
+		Auth:            auths,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 	sshConn, err = ssh.Dial("tcp", sshAddress, sshConf)
